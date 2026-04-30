@@ -104,13 +104,89 @@ class TestMetrics:
             metrics.update(data={'line': 'log'}, response_time=i + 1)
         
         p95 = metrics.get_p95_response_time()
-        assert p95 == 96
+        assert pytest.approx(p95, 0.01) == 95.05
     
     def test_get_p95_response_time_none(self):
         metrics = Metrics()
         p95 = metrics.get_p95_response_time()
         assert p95 is None
+
+
+class TestPercentileCalculation:
+    def test_p95_small_sample_linear_interpolation(self):
+        """
+        测试小样本时 P95 计算是否使用线性插值而不是简单取整
+        
+        10 个样本 (1-10):
+        - 旧方法: int(10 * 0.95) = 9 → 取索引 9 (值 10)
+        - 新方法: i = 0.95 * 9 = 8.55 → 插值结果 = 9.55
+        """
+        metrics = Metrics()
+        for i in range(10):
+            metrics.update(data={'line': 'log'}, response_time=i + 1)
+        
+        p95 = metrics.get_p95_response_time()
+        assert pytest.approx(p95, 0.01) == 9.55
+        assert p95 != 10
     
+    def test_percentile_single_sample(self):
+        """单一样本时，任何百分位都返回该值"""
+        metrics = Metrics()
+        metrics.update(data={'line': 'log'}, response_time=50.0)
+        
+        p95 = metrics.get_p95_response_time()
+        assert p95 == 50.0
+    
+    def test_percentile_two_samples(self):
+        """两个样本的 P95 计算"""
+        metrics = Metrics()
+        metrics.update(data={'line': 'log'}, response_time=10.0)
+        metrics.update(data={'line': 'log'}, response_time=20.0)
+        
+        p95 = metrics.get_p95_response_time()
+        assert pytest.approx(p95, 0.01) == 19.5
+    
+    def test_percentile_0_percent(self):
+        """测试 _calculate_percentile 方法的 0 百分位边界"""
+        metrics = Metrics()
+        for i in range(10):
+            metrics.update(data={'line': 'log'}, response_time=i + 1)
+        
+        p0 = metrics._calculate_percentile(metrics.response_times, 0.0)
+        assert p0 == 1.0
+    
+    def test_percentile_100_percent(self):
+        """测试 _calculate_percentile 方法的 100 百分位边界"""
+        metrics = Metrics()
+        for i in range(10):
+            metrics.update(data={'line': 'log'}, response_time=i + 1)
+        
+        p100 = metrics._calculate_percentile(metrics.response_times, 100.0)
+        assert p100 == 10.0
+    
+    def test_percentile_exact_index(self):
+        """测试百分位正好落在整数索引上"""
+        metrics = Metrics()
+        for i in range(5):
+            metrics.update(data={'line': 'log'}, response_time=i + 1)
+        
+        p50 = metrics._calculate_percentile(metrics.response_times, 50.0)
+        assert p50 == 3.0
+    
+    def test_percentile_unsorted_data(self):
+        """测试未排序数据的百分位计算"""
+        metrics = Metrics()
+        metrics.update(data={'line': 'log'}, response_time=30.0)
+        metrics.update(data={'line': 'log'}, response_time=10.0)
+        metrics.update(data={'line': 'log'}, response_time=50.0)
+        metrics.update(data={'line': 'log'}, response_time=20.0)
+        metrics.update(data={'line': 'log'}, response_time=40.0)
+        
+        p50 = metrics._calculate_percentile(metrics.response_times, 50.0)
+        assert p50 == 30.0
+
+
+class TestMetricsToDict:
     def test_to_dict(self):
         metrics = Metrics()
         metrics.update(data={'line': 'log'}, is_error=True, status_code=500, response_time=100)

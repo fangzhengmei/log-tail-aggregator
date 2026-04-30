@@ -50,9 +50,50 @@ class Metrics:
     def get_p95_response_time(self) -> Optional[float]:
         if not self.response_times:
             return None
-        sorted_times = sorted(self.response_times)
-        index = int(len(sorted_times) * 0.95)
-        return sorted_times[index]
+        return self._calculate_percentile(self.response_times, 95.0)
+    
+    def _calculate_percentile(self, data: List[float], percentile: float) -> float:
+        """
+        使用线性插值法计算百分位（NumPy/Excel 标准方法）
+        
+        公式：
+        - n = 样本数
+        - i = (percentile / 100) * (n - 1)
+        - k = floor(i), d = i - k (小数部分)
+        - 结果 = sorted[k] + d * (sorted[k+1] - sorted[k])
+        
+        例如：10 个样本，95 百分位
+        - i = 0.95 * 9 = 8.55
+        - k = 8, d = 0.55
+        - 结果 = sorted[8] + 0.55 * (sorted[9] - sorted[8])
+        
+        这样避免了小样本时直接取最大值的偏差
+        """
+        if not data:
+            return 0.0
+        
+        sorted_data = sorted(data)
+        n = len(sorted_data)
+        
+        if n == 1:
+            return sorted_data[0]
+        
+        if percentile <= 0:
+            return sorted_data[0]
+        if percentile >= 100:
+            return sorted_data[-1]
+        
+        i = (percentile / 100.0) * (n - 1)
+        k = int(i)
+        d = i - k
+        
+        if k >= n - 1:
+            return sorted_data[-1]
+        
+        if d == 0:
+            return sorted_data[k]
+        
+        return sorted_data[k] + d * (sorted_data[k + 1] - sorted_data[k])
     
     def to_dict(self, duration_seconds: float) -> Dict[str, Any]:
         result = {

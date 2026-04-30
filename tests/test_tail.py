@@ -5,7 +5,7 @@ import time
 import threading
 from unittest.mock import Mock, patch
 
-from logtail.tail import LogTailer
+from logtail.tail import LogTailer, read_lines_with_fallback, DEFAULT_ENCODINGS
 
 
 class TestLogTailer:
@@ -190,3 +190,88 @@ class TestLogTailer:
         tailer.tail_file(str(log_file))
         
         assert callback.call_count == 2
+
+
+class TestEncodingHandling:
+    def test_default_encodings_list(self):
+        assert 'utf-8' in DEFAULT_ENCODINGS
+        assert 'gbk' in DEFAULT_ENCODINGS
+        assert 'gb2312' in DEFAULT_ENCODINGS
+        assert 'gb18030' in DEFAULT_ENCODINGS
+        assert 'latin-1' in DEFAULT_ENCODINGS
+    
+    def test_read_lines_with_fallback_utf8_file(self, tmp_path):
+        log_file = tmp_path / 'utf8.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n中文日志\n', encoding='utf-8')
+        
+        lines, offset, encoding = read_lines_with_fallback(str(log_file))
+        
+        assert len(lines) == 2
+        assert encoding == 'utf-8'
+        assert 'GET /api' in lines[0]
+        assert '中文日志' in lines[1]
+    
+    def test_read_lines_with_fallback_gbk_file(self, tmp_path):
+        log_file = tmp_path / 'gbk.log'
+        gbk_content = 'GET /api HTTP/1.1 200 50ms\n中文日志测试\n'.encode('gbk')
+        log_file.write_bytes(gbk_content)
+        
+        lines, offset, encoding = read_lines_with_fallback(str(log_file))
+        
+        assert len(lines) == 2
+        assert encoding == 'gbk'
+        assert 'GET /api' in lines[0]
+        assert '中文日志测试' in lines[1]
+    
+    def test_read_lines_with_fallback_with_offset(self, tmp_path):
+        log_file = tmp_path / 'test.log'
+        log_file.write_text('line1\nline2\nline3\n')
+        
+        lines1, offset1, _ = read_lines_with_fallback(str(log_file), offset=0)
+        assert len(lines1) == 3
+        
+        lines2, offset2, _ = read_lines_with_fallback(str(log_file), offset=offset1)
+        assert len(lines2) == 0
+    
+    def test_read_lines_with_fallback_from_middle(self, tmp_path):
+        log_file = tmp_path / 'test.log'
+        lines_content = [b'line1\n', b'line2\n', b'line3\n']
+        content = b''.join(lines_content)
+        log_file.write_bytes(content)
+        
+        first_line_len = len(lines_content[0])
+        
+        lines, offset, _ = read_lines_with_fallback(str(log_file), offset=first_line_len)
+        
+        assert len(lines) == 2
+        assert lines[0].strip() == 'line2'
+        assert lines[1].strip() == 'line3'
+    
+    def test_tail_file_with_gbk_encoding(self, tmp_path):
+        log_file = tmp_path / 'gbk.log'
+        gbk_content = 'initial line\n'.encode('gbk')
+        log_file.write_bytes(gbk_content)
+        
+        callback = Mock()
+        tailer = LogTailer(patterns=[str(log_file)], callback=callback)
+        tailer.check_new_files()
+        
+        new_content = '新的日志行\n'.encode('gbk')
+        with open(str(log_file), 'ab') as f:
+            f.write(new_content)
+        
+        tailer.tail_file(str(log_file))
+        
+        assert callback.call_count == 1
+        assert '新的日志行' in callback.call_args[0][0]['line']
+    
+    def test_tailer_check_new_files_uses_binary_mode(self, tmp_path):
+        log_file = tmp_path / 'gbk.log'
+        gbk_content = '日志内容\n'.encode('gbk')
+        log_file.write_bytes(gbk_content)
+        
+        tailer = LogTailer(patterns=[str(log_file)])
+        tailer.check_new_files()
+        
+        assert str(log_file) in tailer.files
+        assert tailer.files[str(log_file)] == len(gbk_content)
