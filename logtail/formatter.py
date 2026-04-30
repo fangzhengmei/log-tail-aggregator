@@ -50,15 +50,29 @@ class JsonFormatter(BaseFormatter):
 
 
 class TextFormatter(BaseFormatter):
+    def _format_float(self, value: Optional[float], default: str = "N/A") -> str:
+        if value is None:
+            return default
+        return f"{value:.2f}"
+    
     def format_window(self, start_time: float, end_time: float, metrics: Dict[str, Any]) -> str:
+        qps_value = metrics.get('qps')
+        qps_str = self._format_float(qps_value, "N/A (use --duration)")
+        
         lines = [
             "=" * 60,
             f"Window: {self._format_time(start_time)} - {self._format_time(end_time)}",
             "=" * 60,
             f"  Total Requests: {metrics.get('total_count', 0)}",
-            f"  QPS: {metrics.get('qps', 0.0):.2f}",
-            f"  Error Rate: {metrics.get('error_rate', 0.0):.2f}%",
+            f"  QPS: {qps_str}",
+            f"  Error Rate: {self._format_float(metrics.get('error_rate', 0.0))}%",
         ]
+        
+        if 'qps_note' in metrics:
+            lines.append(f"  Note: {metrics['qps_note']}")
+        
+        if 'qps_calculation_note' in metrics:
+            lines.append(f"  Note: {metrics['qps_calculation_note']}")
         
         if 'status_codes' in metrics:
             lines.append("  Status Codes:")
@@ -98,13 +112,16 @@ class TextFormatter(BaseFormatter):
     
     def format_summary(self, total_stats: Dict[str, Any]) -> str:
         total = total_stats.get('total', {}).get('metrics', {})
+        qps_value = total.get('qps')
+        qps_str = self._format_float(qps_value, "N/A")
+        
         lines = [
             "=" * 60,
             "SUMMARY",
             "=" * 60,
             f"  Total Requests: {total.get('total_count', 0)}",
-            f"  Average QPS: {total.get('qps', 0.0):.2f}",
-            f"  Error Rate: {total.get('error_rate', 0.0):.2f}%",
+            f"  Average QPS: {qps_str}",
+            f"  Error Rate: {self._format_float(total.get('error_rate', 0.0))}%",
         ]
         
         if 'status_codes' in total:
@@ -123,6 +140,11 @@ class TextFormatter(BaseFormatter):
 
 
 class TableFormatter(BaseFormatter):
+    def _format_float(self, value: Optional[float], default: str = "N/A") -> str:
+        if value is None:
+            return default
+        return f"{value:.2f}"
+    
     def _draw_line(self, width: int, char: str = "-") -> str:
         return "+" + char * (width - 2) + "+"
     
@@ -131,6 +153,9 @@ class TableFormatter(BaseFormatter):
     
     def format_window(self, start_time: float, end_time: float, metrics: Dict[str, Any]) -> str:
         width = 60
+        qps_value = metrics.get('qps')
+        qps_str = self._format_float(qps_value, "N/A")
+        
         lines = [
             self._draw_line(width),
             self._format_row(f"Window: {self._format_time(start_time)} - {self._format_time(end_time)}", width),
@@ -139,12 +164,15 @@ class TableFormatter(BaseFormatter):
         
         rows = [
             ("Total Requests", str(metrics.get('total_count', 0))),
-            ("QPS", f"{metrics.get('qps', 0.0):.2f}"),
-            ("Error Rate", f"{metrics.get('error_rate', 0.0):.2f}%"),
+            ("QPS", qps_str),
+            ("Error Rate", f"{self._format_float(metrics.get('error_rate', 0.0))}%"),
         ]
         
         for label, value in rows:
             lines.append(self._format_row(f"{label}: {value}", width))
+        
+        if 'qps_note' in metrics:
+            lines.append(self._format_row(f"Note: {metrics['qps_note']}", width))
         
         if 'status_codes' in metrics:
             lines.append(self._draw_line(width, "-"))
@@ -180,14 +208,16 @@ class TableFormatter(BaseFormatter):
     def format_summary(self, total_stats: Dict[str, Any]) -> str:
         width = 60
         total = total_stats.get('total', {}).get('metrics', {})
+        qps_value = total.get('qps')
+        qps_str = self._format_float(qps_value, "N/A")
         
         lines = [
             self._draw_line(width, "="),
             self._format_row("SUMMARY", width),
             self._draw_line(width, "="),
             self._format_row(f"Total Requests: {total.get('total_count', 0)}", width),
-            self._format_row(f"Average QPS: {total.get('qps', 0.0):.2f}", width),
-            self._format_row(f"Error Rate: {total.get('error_rate', 0.0):.2f}%", width),
+            self._format_row(f"Average QPS: {qps_str}", width),
+            self._format_row(f"Error Rate: {self._format_float(total.get('error_rate', 0.0))}%", width),
         ]
         
         if 'avg_response_time' in total:

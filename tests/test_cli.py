@@ -184,3 +184,140 @@ class TestLogTailAggregator:
         parsed = json.loads(captured.out)
         assert parsed['type'] == 'window'
         assert parsed['metrics']['total_count'] == 2
+
+
+class TestAnalyzeQpsCalculation:
+    def test_analyze_without_duration_no_qps(self, tmp_path):
+        log_file = tmp_path / 'access.log'
+        log_content = """GET /api/users HTTP/1.1 200 45ms
+GET /api/users HTTP/1.1 200 30ms
+"""
+        log_file.write_text(log_content)
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--lines', '2', '--format', 'json'])
+        
+        assert result.exit_code == 0
+        import json
+        parsed = json.loads(result.output)
+        assert parsed['metrics']['qps'] is None
+        assert '未指定时间范围' in parsed['metrics'].get('qps_note', '')
+    
+    def test_analyze_with_duration_calculates_qps(self, tmp_path):
+        log_file = tmp_path / 'access.log'
+        log_content = """GET /api/users HTTP/1.1 200 45ms
+GET /api/users HTTP/1.1 200 30ms
+GET /api/users HTTP/1.1 200 25ms
+GET /api/users HTTP/1.1 200 35ms
+"""
+        log_file.write_text(log_content)
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--lines', '4', '--duration', '2', '--format', 'json'])
+        
+        assert result.exit_code == 0
+        import json
+        parsed = json.loads(result.output)
+        assert parsed['metrics']['qps'] == 2.0
+        assert '基于用户指定的' in parsed['metrics'].get('qps_calculation_note', '')
+    
+    def test_analyze_with_zero_duration_no_qps(self, tmp_path):
+        log_file = tmp_path / 'access.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--duration', '0', '--format', 'json'])
+        
+        assert result.exit_code == 0
+        import json
+        parsed = json.loads(result.output)
+        assert parsed['metrics']['qps'] is None
+    
+    def test_analyze_with_negative_duration_no_qps(self, tmp_path):
+        log_file = tmp_path / 'access.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--duration', '-10', '--format', 'json'])
+        
+        assert result.exit_code == 0
+        import json
+        parsed = json.loads(result.output)
+        assert parsed['metrics']['qps'] is None
+
+
+class TestEncodingHandling:
+    def test_utf8_file_reads_correctly(self, tmp_path):
+        log_file = tmp_path / 'utf8.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n中文日志\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file)])
+        
+        assert result.exit_code == 0
+        assert 'Total Requests' in result.output
+    
+    def test_gbk_encoded_file(self, tmp_path):
+        log_file = tmp_path / 'gbk.log'
+        gbk_content = 'GET /api HTTP/1.1 200 50ms\n中文日志测试\n'.encode('gbk')
+        log_file.write_bytes(gbk_content)
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file)])
+        
+        assert result.exit_code == 0
+        assert 'Total Requests' in result.output
+
+
+class TestInvalidRegexHandling:
+    def test_invalid_regex_in_extraction_rule_raises_error(self):
+        from logtail.extractor import ExtractionRule, InvalidRegexError
+        
+        with pytest.raises(InvalidRegexError) as excinfo:
+            ExtractionRule(
+                name='bad_rule',
+                pattern=r'[invalid-regex'
+            )
+        
+        assert 'bad_rule' in str(excinfo.value)
+        assert '正则表达式无效' in str(excinfo.value)
+    
+    def test_analyze_with_invalid_regex_config(self, tmp_path):
+        config_file = tmp_path / 'bad_config.yaml'
+        bad_config = """
+rules:
+  - name: bad_rule
+    pattern: '[invalid-regex'
+"""
+        config_file.write_text(bad_config)
+        
+        log_file = tmp_path / 'test.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--config', str(config_file)])
+        
+        assert result.exit_code == 1
+        assert '错误' in result.output or 'error' in result.output.lower()
+    
+    def test_analyze_with_valid_regex_config(self, tmp_path):
+        config_file = tmp_path / 'good_config.yaml'
+        good_config = """
+rules:
+  - name: method
+    pattern: '(GET|POST)'
+  - name: status_code
+    pattern: 'HTTP/\d\.\d\s+(\d{3})'
+    type: integer
+    is_status_code: true
+"""
+        config_file.write_text(good_config)
+        
+        log_file = tmp_path / 'test.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--config', str(config_file)])
+        
+        assert result.exit_code == 0
+        assert 'Total Requests' in result.output

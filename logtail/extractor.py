@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+class InvalidRegexError(Exception):
+    pass
+
+
 class FieldType(Enum):
     STRING = "string"
     INTEGER = "integer"
@@ -25,7 +29,10 @@ class ExtractionRule:
     compiled_pattern: Optional[Pattern] = None
     
     def __post_init__(self):
-        self.compiled_pattern = re.compile(self.pattern)
+        try:
+            self.compiled_pattern = re.compile(self.pattern)
+        except re.error as e:
+            raise InvalidRegexError(f"规则 '{self.name}' 中的正则表达式无效: '{self.pattern}'. 错误: {e}") from e
     
     def extract(self, line: str) -> Any:
         match = self.compiled_pattern.search(line)
