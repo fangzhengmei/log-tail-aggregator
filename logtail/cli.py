@@ -265,7 +265,7 @@ def analyze(file_path, lines, format_type, config_file, duration):
         metrics_dict['qps'] = None
         metrics_dict['qps_note'] = "未指定时间范围，QPS 不适用（使用 --duration 参数指定时间范围以计算 QPS）"
     
-    output = formatter.format_window(0, len(recent_lines), metrics_dict)
+    output = formatter.format_static_analysis(metrics_dict)
     click.echo(output)
 
 

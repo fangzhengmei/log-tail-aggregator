@@ -76,8 +76,9 @@ GET /api/nonexistent HTTP/1.1 404 10ms
         assert result.exit_code == 0
         import json
         parsed = json.loads(result.output)
-        assert parsed['type'] == 'window'
+        assert parsed['type'] == 'static_analysis'
         assert 'metrics' in parsed
+        assert 'analysis_time' in parsed
     
     def test_analyze_command_table_format(self, tmp_path):
         log_file = tmp_path / 'test.log'
@@ -307,7 +308,7 @@ rules:
   - name: method
     pattern: '(GET|POST)'
   - name: status_code
-    pattern: 'HTTP/\d\.\d\s+(\d{3})'
+    pattern: 'HTTP/\\d\\.\\d\\s+(\\d{3})'
     type: integer
     is_status_code: true
 """
@@ -321,3 +322,115 @@ rules:
         
         assert result.exit_code == 0
         assert 'Total Requests' in result.output
+
+
+class TestStaticAnalysisTimeDisplay:
+    def test_analyze_output_should_not_show_1970(self, tmp_path):
+        log_file = tmp_path / 'access.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file)])
+        
+        assert result.exit_code == 0
+        assert '1970' not in result.output
+    
+    def test_analyze_text_format_shows_static_analysis_label(self, tmp_path):
+        log_file = tmp_path / 'access.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--format', 'text'])
+        
+        assert result.exit_code == 0
+        assert '静态分析' in result.output
+    
+    def test_analyze_table_format_shows_static_analysis_label(self, tmp_path):
+        log_file = tmp_path / 'access.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--format', 'table'])
+        
+        assert result.exit_code == 0
+        assert '静态分析' in result.output
+    
+    def test_analyze_json_format_has_static_analysis_type(self, tmp_path):
+        log_file = tmp_path / 'access.log'
+        log_file.write_text('GET /api HTTP/1.1 200 50ms\n')
+        
+        runner = CliRunner()
+        result = runner.invoke(main, ['analyze', str(log_file), '--format', 'json'])
+        
+        assert result.exit_code == 0
+        import json
+        parsed = json.loads(result.output)
+        assert parsed['type'] == 'static_analysis'
+        assert 'analysis_time' in parsed
+        assert '1970' not in parsed['analysis_time']
+
+
+class TestFormatterStaticAnalysis:
+    def test_text_formatter_static_analysis_format(self):
+        from logtail.formatter import TextFormatter
+        from datetime import datetime
+        import time
+        
+        formatter = TextFormatter()
+        test_time = time.time()
+        metrics = {
+            'total_count': 10,
+            'error_count': 1,
+            'qps': None,
+            'error_rate': 10.0,
+            'qps_note': '未指定时间范围'
+        }
+        
+        output = formatter.format_static_analysis(metrics, analysis_time=test_time)
+        
+        assert '静态分析' in output
+        assert 'Total Requests: 10' in output
+        assert '1970' not in output
+        assert datetime.fromtimestamp(test_time).strftime('%Y-%m-%d') in output
+    
+    def test_json_formatter_static_analysis_format(self):
+        from logtail.formatter import JsonFormatter
+        import time
+        import json
+        
+        formatter = JsonFormatter()
+        test_time = time.time()
+        metrics = {
+            'total_count': 10,
+            'error_count': 1,
+            'qps': 5.0,
+            'error_rate': 10.0
+        }
+        
+        output = formatter.format_static_analysis(metrics, analysis_time=test_time)
+        parsed = json.loads(output)
+        
+        assert parsed['type'] == 'static_analysis'
+        assert 'analysis_time' in parsed
+        assert parsed['metrics']['total_count'] == 10
+        assert '1970' not in parsed['analysis_time']
+    
+    def test_table_formatter_static_analysis_format(self):
+        from logtail.formatter import TableFormatter
+        import time
+        
+        formatter = TableFormatter()
+        test_time = time.time()
+        metrics = {
+            'total_count': 10,
+            'error_count': 1,
+            'qps': 5.0,
+            'error_rate': 10.0
+        }
+        
+        output = formatter.format_static_analysis(metrics, analysis_time=test_time)
+        
+        assert '静态分析' in output
+        assert '|' in output
+        assert '+' in output
+        assert '1970' not in output
